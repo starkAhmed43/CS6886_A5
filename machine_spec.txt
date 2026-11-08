@@ -1,0 +1,34 @@
+# Machine specification (Q1). Fill in every field; give units. Fill in N/A if not applicable.
+
+CPU model                       : Apple M1 (MacBookPro17,1)
+Microarchitecture               : Firestorm (P cores) + Icestorm (E cores), ARMv8.5-A
+Physical cores                  : 8
+Logical cores (hardware threads): 8 (no SMT)
+Performance / efficiency cores  : 4 P + 4 E
+Base clock (GHz)                : N/A (no base clock on Apple Silicon; lowest DVFS step is 0.600 GHz for both clusters)
+Max single-core clock (GHz)     : 3.204 (P core, DVFS table); 2.064 (E core, DVFS table). Measured: P 3.13-3.17; E 1.2-1.3 (background QoS only)
+All-core clock under load (GHz) : P, 4 threads: 2.81-2.97 per thread (measured); 8 threads, P and E mixed: 2.07-2.51 per thread (measured); E alone not separated
+SIMD instruction set and width  : ARM NEON (Advanced SIMD), 128-bit = 4 FP32 lanes
+FMA units per core              : 4 (P core, measured); 4 (E core, measured, 3.8-4.0 FMA/cycle)
+Vector registers per core       : 32 x 128-bit (v0-v31)
+L1 data cache (per core)        : 128 KB per P core; 64 KB per E core (sysctl)
+L2 cache (size, shared by)      : 12 MB shared by the 4 P cores; 4 MB shared by the 4 E cores (sysctl)
+L3 cache (size, shared by)      : N/A (the system-level cache is a memory-side cache, not a CPU L3)
+Cache line size (bytes)         : 128
+RAM size (GB)                   : 16
+RAM type, speed (MT/s), channels: LPDDR4 as reported by system_profiler; speed not exposed (4266 MT/s is the public M1 value, assumed); 8 channels (ioreg dcs_num_channels)
+Operating system                : macOS 27.3 (Darwin 27.3.0)
+Compiler and version            : Homebrew clang 23.1.5
+
+# Derived (show the calculation in report.pdf)
+Peak FP32 GFLOP/s, one core     : 102.5 (one P core: 3.204 GHz x 4 FMA x 4 lanes x 2 FLOP); measured 101.6 with a NEON FMA benchmark
+Peak FP32 GFLOP/s, all cores    : 674.3 (4 P x 102.5 + 4 E x 66.0, at max clocks, E: 2.064 GHz x 4 FMA x 4 x 2); measured 620.9 with 8 threads
+Memory bandwidth (GB/s)         : 68.3 (computed: 4266 MT/s x 16 B = 68.256 GB/s); STREAM triad check: 55.9 best of 3 runs at 2 threads (1 thread 55.8, 4 threads 54.3, 8 threads 48.2), 82% of the computed value
+Ridge point, one core (FLOP/B)  : 1.50 (102.5 / 68.3)
+Ridge point, all cores (FLOP/B) : 9.87 (674.3 / 68.3)
+
+# Notes
+# - Read from the system: CPU name, core counts, caches, line size, RAM size and type, max clocks (ioreg DVFS tables).
+# - Measured: clocks under load, FMA units and the 101.6 / 620.9 GFLOP/s checks, STREAM bandwidth (check only).
+# - Assumed: RAM speed 4266 MT/s and 16 bit per channel (not exposed by the system); the 128-bit bus is 8 x 16 bit.
+# - E-core FMA count rests on a taskpolicy -b run that probably ran on E cores. This is not proven.
