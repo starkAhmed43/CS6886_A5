@@ -1,9 +1,8 @@
 /*
  * attn_loops.c -- Q3a: loop reordering so the compiler can vectorise.
  *
- * Placeholder: replace the body of attention() with your implementation.
- * Keep the driver (main) below unchanged. See attn_naive.c for the input and
- * output format.
+ * K is transposed once so every inner loop is contiguous and vectorisable.
+ * Driver (main) unchanged; see attn_naive.c for the input/output format.
  */
 #define _POSIX_C_SOURCE 200809L
 #include <math.h>
@@ -17,13 +16,61 @@
 #endif
 
 /* ------------------------------------------------------------------------- */
-/* attention(): write your implementation here.                               */
+/* attention()                                                                */
 /* ------------------------------------------------------------------------- */
+/* Kt is K transposed (d x N) so the inner j loop is contiguous; the PV loop runs over d. */
 void attention(const float *Q, const float *K, const float *V, float *O, int N, int d)
 {
-    (void)Q; (void)K; (void)V; (void)O; (void)N; (void)d;
-    printf("attn_loops: not implemented yet\n");
-    exit(0); /* no output file is written, so `make check` skips this variant */
+    const float scale = 1.0f / sqrtf((float)d);
+    float *S = malloc((size_t)N * N * sizeof(float));
+    float *Kt = malloc((size_t)N * d * sizeof(float));
+
+    for (int j = 0; j < N; j++)
+        for (int k = 0; k < d; k++)
+            Kt[(size_t)k * N + j] = K[(size_t)j * d + k];
+
+    /* 1. S = Q K^T * scale */
+    for (int i = 0; i < N; i++) {
+        float *row = S + (size_t)i * N;
+        memset(row, 0, (size_t)N * sizeof(float));
+        for (int k = 0; k < d; k++) {
+            const float q = Q[(size_t)i * d + k] * scale;
+            const float *kt = Kt + (size_t)k * N;
+            for (int j = 0; j < N; j++)
+                row[j] += q * kt[j];
+        }
+    }
+
+    /* 2. softmax of each row of S */
+    for (int i = 0; i < N; i++) {
+        float *row = S + (size_t)i * N;
+        float max = row[0];
+        for (int j = 1; j < N; j++)
+            if (row[j] > max)
+                max = row[j];
+        float sum = 0.0f;
+        for (int j = 0; j < N; j++) {
+            row[j] = expf(row[j] - max);
+            sum += row[j];
+        }
+        for (int j = 0; j < N; j++)
+            row[j] = row[j] / sum;
+    }
+
+    /* 3. O = S V */
+    for (int i = 0; i < N; i++) {
+        float *o = O + (size_t)i * d;
+        memset(o, 0, (size_t)d * sizeof(float));
+        for (int j = 0; j < N; j++) {
+            const float p = S[(size_t)i * N + j];
+            const float *v = V + (size_t)j * d;
+            for (int k = 0; k < d; k++)
+                o[k] += p * v[k];
+        }
+    }
+
+    free(Kt);
+    free(S);
 }
 
 /* ------------------------------------------------------------------------- */

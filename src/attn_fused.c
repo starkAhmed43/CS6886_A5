@@ -19,11 +19,58 @@
 /* ------------------------------------------------------------------------- */
 /* attention(): write your implementation here.                               */
 /* ------------------------------------------------------------------------- */
+#define R 4  /* query rows processed together */
+#define JB 16 /* score columns kept in registers per pass */
+
 void attention(const float *Q, const float *K, const float *V, float *O, int N, int d)
 {
-    (void)Q; (void)K; (void)V; (void)O; (void)N; (void)d;
-    printf("attn_fused: not implemented yet\n");
-    exit(0); /* no output file is written, so `make check` skips this variant */
+    float *Kt = malloc((size_t)N * d * sizeof(float));
+    float *s = malloc((size_t)R * N * sizeof(float));
+    for (int j = 0; j < N; j++)
+        for (int k = 0; k < d; k++)
+            Kt[(size_t)k * N + j] = K[(size_t)j * d + k];
+
+    const float scale = 1.0f / sqrtf((float)d);
+    for (int i = 0; i < N; i += R) {
+        const float *q = Q + (size_t)i * d;
+        for (int j0 = 0; j0 < N; j0 += JB) {
+            float acc[R][JB] = {{0}};
+            for (int k = 0; k < d; k++) {
+                const float *kt = Kt + (size_t)k * N + j0;
+                for (int r = 0; r < R; r++) {
+                    const float qk = q[(size_t)r * d + k];
+                    for (int j = 0; j < JB; j++) acc[r][j] += qk * kt[j];
+                }
+            }
+            for (int r = 0; r < R; r++)
+                for (int j = 0; j < JB; j++) s[(size_t)r * N + j0 + j] = acc[r][j] * scale;
+        }
+        float sum[R];
+        for (int r = 0; r < R; r++) {
+            float *sr = s + (size_t)r * N;
+            float m = sr[0];
+            for (int j = 1; j < N; j++) m = sr[j] > m ? sr[j] : m;
+            float t = 0.0f;
+            for (int j = 0; j < N; j++) {
+                sr[j] = expf(sr[j] - m);
+                t += sr[j];
+            }
+            sum[r] = t;
+        }
+        float *o = O + (size_t)i * d;
+        memset(o, 0, (size_t)R * d * sizeof(float));
+        for (int j = 0; j < N; j++) {
+            const float *v = V + (size_t)j * d;
+            for (int r = 0; r < R; r++) {
+                const float p = s[(size_t)r * N + j];
+                for (int k = 0; k < d; k++) o[(size_t)r * d + k] += p * v[k];
+            }
+        }
+        for (int r = 0; r < R; r++)
+            for (int k = 0; k < d; k++) o[(size_t)r * d + k] /= sum[r];
+    }
+    free(Kt);
+    free(s);
 }
 
 /* ------------------------------------------------------------------------- */

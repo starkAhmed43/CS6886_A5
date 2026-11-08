@@ -1,9 +1,8 @@
 /*
  * attn_tiled.c -- Q3b: cache and register tiling.
  *
- * Placeholder: replace the body of attention() with your implementation.
- * Keep the driver (main) below unchanged. See attn_naive.c for the input and
- * output format.
+ * Register micro-tiles (MR x NR accumulators, k loop inside) inside JB-wide cache blocks.
+ * Driver (main) unchanged; see attn_naive.c for the input/output format.
  */
 #define _POSIX_C_SOURCE 200809L
 #include <math.h>
@@ -17,13 +16,75 @@
 #endif
 
 /* ------------------------------------------------------------------------- */
-/* attention(): write your implementation here.                               */
+/* attention()                                                                */
 /* ------------------------------------------------------------------------- */
+#ifndef MR
+#define MR 4   /* rows per register tile */
+#endif
+#ifndef NR
+#define NR 16  /* columns per register tile (NR/4 NEON vectors) */
+#endif
+#ifndef JB
+#define JB 256 /* S columns / V rows per cache block */
+#endif
+
+/* C[MR x NR] (+)= A[MR x kn] * B[kn x NR]; A has stride lda, B and C have stride ldb, ldc. */
+static inline void micro(const float *A, int lda, const float *B, int ldb, float *C, int ldc,
+                         int kn, float alpha, int accumulate)
+{
+    float acc[MR][NR] = {{0}};
+    for (int k = 0; k < kn; k++)
+        for (int r = 0; r < MR; r++) {
+            const float a = A[(size_t)r * lda + k];
+            for (int c = 0; c < NR; c++)
+                acc[r][c] += a * B[(size_t)k * ldb + c];
+        }
+    for (int r = 0; r < MR; r++)
+        for (int c = 0; c < NR; c++)
+            C[(size_t)r * ldc + c] = alpha * acc[r][c] + (accumulate ? C[(size_t)r * ldc + c] : 0.0f);
+}
+
 void attention(const float *Q, const float *K, const float *V, float *O, int N, int d)
 {
-    (void)Q; (void)K; (void)V; (void)O; (void)N; (void)d;
-    printf("attn_tiled: not implemented yet\n");
-    exit(0); /* no output file is written, so `make check` skips this variant */
+    const float scale = 1.0f / sqrtf((float)d);
+    float *S = malloc((size_t)N * N * sizeof(float));
+    float *Kt = malloc((size_t)N * d * sizeof(float));
+
+    for (int j = 0; j < N; j++)
+        for (int k = 0; k < d; k++)
+            Kt[(size_t)k * N + j] = K[(size_t)j * d + k];
+
+    /* 1. S = Q K^T * scale: the d x JB panel of Kt stays in cache across all row blocks */
+    for (int jb = 0; jb < N; jb += JB)
+        for (int i = 0; i < N; i += MR)
+            for (int j = jb; j < jb + JB; j += NR)
+                micro(Q + (size_t)i * d, d, Kt + j, N, S + (size_t)i * N + j, N, d, scale, 0);
+
+    /* 2. softmax of each row of S */
+    for (int i = 0; i < N; i++) {
+        float *row = S + (size_t)i * N;
+        float max = row[0];
+        for (int j = 1; j < N; j++)
+            if (row[j] > max)
+                max = row[j];
+        float sum = 0.0f;
+        for (int j = 0; j < N; j++) {
+            row[j] = expf(row[j] - max);
+            sum += row[j];
+        }
+        for (int j = 0; j < N; j++)
+            row[j] = row[j] / sum;
+    }
+
+    /* 3. O = S V: the JB x d block of V stays in cache across all row blocks */
+    for (int jb = 0; jb < N; jb += JB)
+        for (int i = 0; i < N; i += MR)
+            for (int k = 0; k < d; k += NR)
+                micro(S + (size_t)i * N + jb, N, V + (size_t)jb * d + k, d, O + (size_t)i * d + k, d,
+                      JB, 1.0f, jb > 0);
+
+    free(Kt);
+    free(S);
 }
 
 /* ------------------------------------------------------------------------- */
