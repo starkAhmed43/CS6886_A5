@@ -1,8 +1,8 @@
 variant,N,d,threads,time_ms,gflops,arithmetic_intensity_flop_per_byte,make_check
-naive,1024,64,1,,,,
-naive,2048,64,1,,,,
-naive,4096,64,1,,,,
-naive,4096,128,1,,,,
+naive,1024,64,1,108.136,2.48,8.83,reference
+naive,2048,64,1,444.622,2.41,8.98,reference
+naive,4096,64,1,1819.065,2.36,9.06,reference
+naive,4096,128,1,3854.595,2.23,17.96,reference
 loops,1024,64,1,,,,
 loops,2048,64,1,,,,
 loops,4096,64,1,,,,
